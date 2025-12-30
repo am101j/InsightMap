@@ -9,7 +9,7 @@ Usage:
     python train_model.py
 
 Output:
-    - model/lightgbm_model.txt (trained model)
+    - model/xgboost_model.json (trained model)
     - model/feature_names.json (feature names for prediction)
     - model/top_neighbourhoods.json (neighbourhood mapping)
     - model/metrics.json (model performance metrics)
@@ -20,7 +20,7 @@ import numpy as np
 import geopandas as gpd
 from scipy.spatial import cKDTree
 from shapely.geometry import Point
-import lightgbm as lgb
+import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import json
@@ -29,9 +29,8 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+
+# Configuration
 
 LISTINGS_PATH = "listings.csv"
 SUBWAY_SHAPEFILE_PATH = "subway_data/TTC_SUBWAY_LINES_WGS84.shp"
@@ -193,26 +192,25 @@ def prepare_features(gdf: gpd.GeoDataFrame) -> tuple:
 
 
 def train_model(X: pd.DataFrame, y_log: pd.Series, y_original: pd.Series) -> tuple:
-    """Train LightGBM model."""
-    print("\n[5/5] Training LightGBM model...")
-    print("   Algorithm: LightGBM (Gradient Boosting)")
+    """Train XGBoost model."""
+    print("\n[5/5] Training XGBoost model...")
+    print("   Algorithm: XGBoost (Gradient Boosting)")
     print("   Target: Log-transformed prices")
     
     X_train, X_test, y_train_log, y_test_log = train_test_split(
         X, y_log, test_size=0.2, random_state=42
     )
     
-    # LightGBM configuration
-    model = lgb.LGBMRegressor(
+    # XGBoost configuration
+    model = xgb.XGBRegressor(
         n_estimators=200,
         max_depth=8,
         learning_rate=0.05,
-        min_child_samples=20,
+        min_child_weight=3,
         subsample=0.8,
         colsample_bytree=0.8,
         random_state=42,
-        n_jobs=-1,
-        verbose=-1
+        n_jobs=-1
     )
     
     print(f"   Training on {len(X_train):,} samples...")
@@ -245,9 +243,9 @@ def save_model(model, feature_names, top_neighbourhoods, metrics, importances):
     
     os.makedirs(MODEL_DIR, exist_ok=True)
     
-    # Save LightGBM model
-    model_path = os.path.join(MODEL_DIR, "lightgbm_model.txt")
-    model.booster_.save_model(model_path)
+    # Save XGBoost model
+    model_path = os.path.join(MODEL_DIR, "xgboost_model.json")
+    model.get_booster().save_model(model_path)
     print(f"   + Model saved: {model_path}")
     
     # Save feature names
@@ -298,11 +296,8 @@ def main():
     # Save everything
     save_model(model, feature_names, top_neighbourhoods, metrics, importances)
     
-    print()
-    print("=" * 60)
-    print("Training complete! Model saved to 'model/' directory.")
-    print("   Run 'streamlit run app.py' to start the prediction app.")
-    print("=" * 60)
+    print("\nTraining complete! Model saved to 'model/' directory.")
+    print("Run 'streamlit run app.py' to start the prediction app.")
 
 
 if __name__ == "__main__":

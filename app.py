@@ -1,14 +1,10 @@
 """
 InsightMap - Geospatial Price Prediction
-=========================================
 
-A production-quality application that predicts Toronto Airbnb prices using 
-advanced spatial feature engineering, neighborhood analysis, and machine learning.
+Predicts Toronto Airbnb prices using spatial feature engineering, neighborhood analysis, and machine learning.
 
-This app loads a PRE-TRAINED model from the 'model/' directory.
 To train the model, run: python train_model.py
 
-Author: Geospatial ML Portfolio Project
 """
 
 import pandas as pd
@@ -29,32 +25,19 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# =============================================================================
-# CONFIGURATION CONSTANTS
-# =============================================================================
 
-# File paths
+# Configuration
 LISTINGS_PATH = "listings.csv"
 SUBWAY_SHAPEFILE_PATH = "subway_data/TTC_SUBWAY_LINES_WGS84.shp"
 NEIGHBOURHOOD_SHAPEFILE_PATH = "neighbourhood_data/Neighbourhoods - 4326.shp"
 MODEL_DIR = "model"
-
-# Union Station coordinates (major transit hub in Toronto)
 UNION_STATION_LAT = 43.6456
 UNION_STATION_LON = -79.3806
 
-# Price filter threshold (remove outliers)
 MAX_PRICE = 1000
-
-# Map center (Toronto downtown)
 TORONTO_CENTER = [43.6532, -79.3832]
-
-# Top neighborhoods to include (others grouped as "Other")
 TOP_N_NEIGHBOURHOODS = 15
 
-# =============================================================================
-# CUSTOM STYLING
-# =============================================================================
 
 def apply_custom_styling():
     """Apply clean, minimal light mode CSS styling."""
@@ -291,21 +274,17 @@ def apply_custom_styling():
     """, unsafe_allow_html=True)
 
 
-# =============================================================================
-# STEP 1: ROBUST DATA LOADING (ENHANCED)
-# =============================================================================
 
 @st.cache_data
 def load_and_clean_data(filepath: str) -> pd.DataFrame:
-    """
-    Load and clean the Airbnb listings data with enhanced feature extraction.
-    """
+    #Load and clean the Airbnb listings data with feature extraction.
     print("Loading listings data...")
     
     df = pd.read_csv(filepath, on_bad_lines='skip')
     print(f"  Loaded {len(df)} rows")
     
-    # --- Clean the Price column ---
+    
+    # Clean Price
     if df['price'].dtype == object:
         df['price'] = (
             df['price']
@@ -320,36 +299,31 @@ def load_and_clean_data(filepath: str) -> pd.DataFrame:
     
     print(f"  After price cleaning: {len(df)} rows")
     
-    # --- Clean Coordinates ---
+    # Clean Coordinates
     df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
     df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
     df = df.dropna(subset=['latitude', 'longitude'])
     
     print(f"  After coordinate cleaning: {len(df)} rows")
     
-    # --- Clean Additional Features ---
-    # Number of reviews
+    # Clean Additional Features
     df['number_of_reviews'] = pd.to_numeric(df['number_of_reviews'], errors='coerce').fillna(0)
     
-    # Reviews per month
     df['reviews_per_month'] = pd.to_numeric(df['reviews_per_month'], errors='coerce').fillna(0)
     
-    # Minimum nights
     df['minimum_nights'] = pd.to_numeric(df['minimum_nights'], errors='coerce').fillna(1)
-    df['minimum_nights'] = df['minimum_nights'].clip(upper=365)  # Cap outliers
+    df['minimum_nights'] = df['minimum_nights'].clip(upper=365)
     
-    # Availability
     df['availability_365'] = pd.to_numeric(df['availability_365'], errors='coerce').fillna(0)
     
-    # Host listings count
     df['calculated_host_listings_count'] = pd.to_numeric(
         df['calculated_host_listings_count'], errors='coerce'
     ).fillna(1)
     
-    # --- Clean Neighbourhood ---
+
+    
     df['neighbourhood'] = df['neighbourhood'].fillna('Unknown')
     
-    # --- Filter Outliers ---
     df = df[df['price'] < MAX_PRICE]
     
     print(f"  After outlier filtering (price < {MAX_PRICE}): {len(df)} rows")
@@ -359,13 +333,10 @@ def load_and_clean_data(filepath: str) -> pd.DataFrame:
     return df
 
 
-# =============================================================================
-# STEP 2: ADVANCED SPATIAL ENGINEERING
-# =============================================================================
 
 @st.cache_data
 def load_neighbourhood_boundaries(filepath: str) -> gpd.GeoDataFrame:
-    """Load Toronto neighbourhood boundary polygons."""
+    #Load Toronto neighbourhood boundary polygons
     print("Loading neighbourhood boundaries...")
     neighbourhoods_gdf = gpd.read_file(filepath)
     print(f"  Loaded {len(neighbourhoods_gdf)} neighbourhoods")
@@ -388,7 +359,6 @@ def detect_neighbourhood(lat: float, lon: float, neighbourhoods_gdf: gpd.GeoData
     if len(result) > 0 and 'AREA_NA7' in result.columns and pd.notna(result.iloc[0]['AREA_NA7']):
         return result.iloc[0]['AREA_NA7']
     
-    # Fallback: check for AREA_NAME column
     if len(result) > 0 and 'AREA_NAME' in result.columns and pd.notna(result.iloc[0]['AREA_NAME']):
         return result.iloc[0]['AREA_NAME']
     
@@ -398,15 +368,8 @@ def detect_neighbourhood(lat: float, lon: float, neighbourhoods_gdf: gpd.GeoData
 def load_subway_data(filepath: str) -> gpd.GeoDataFrame:
     """
     Load subway shapefile and extract station points from line geometries.
-    
-    CRITICAL COORDINATE TRANSFORMATION:
-    We convert from EPSG:4326 (WGS84, degrees) to EPSG:32617 (UTM Zone 17N, meters)
-    because we need distances in METERS, not degrees. Degrees vary in real-world
-    distance depending on latitude - 1 degree of longitude is ~111km at the equator
-    but only ~85km at Toronto's latitude.
-    """
-    print("Loading subway shapefile...")
-    
+    Converts to EPSG:32617 (UTM Zone 17N) for meter-based distances.
+    """    
     subway_gdf = gpd.read_file(filepath)
     
     # Extract all vertices (points) from line geometries
@@ -470,7 +433,6 @@ def engineer_spatial_features(
     subway_tree: cKDTree,
     union_coords: tuple
 ) -> gpd.GeoDataFrame:
-    """Engineer spatial features: distance to subway and Union Station."""
     
     housing_coords = np.array([
         [geom.x, geom.y] for geom in housing_gdf.geometry
@@ -497,10 +459,6 @@ def engineer_spatial_features(
     
     return housing_gdf
 
-
-# =============================================================================
-# STEP 3: LOAD PRE-TRAINED MODEL
-# =============================================================================
 
 @st.cache_resource
 def load_trained_model() -> tuple:
@@ -533,22 +491,18 @@ def load_trained_model() -> tuple:
     booster.load_model(model_path)
     print("   + Model loaded")
     
-    # Load feature names
+    # Load metadata
     with open(os.path.join(MODEL_DIR, "feature_names.json"), 'r') as f:
         feature_names = json.load(f)
-    print(f"   + {len(feature_names)} features loaded")
     
-    # Load top neighbourhoods
     with open(os.path.join(MODEL_DIR, "top_neighbourhoods.json"), 'r') as f:
         top_neighbourhoods = json.load(f)
     print(f"   + {len(top_neighbourhoods)} neighbourhoods loaded")
     
-    # Load metrics
     with open(os.path.join(MODEL_DIR, "metrics.json"), 'r') as f:
         metrics = json.load(f)
     print(f"   + Metrics loaded (R^2: {metrics['r2']:.1%})")
     
-    # Load feature importances
     with open(os.path.join(MODEL_DIR, "feature_importances.json"), 'r') as f:
         importances = json.load(f)
     
@@ -585,7 +539,6 @@ def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
         else:
             display_names.append(f)
     
-    # Clean light theme colors
     bg_color = '#ffffff'
     text_color = '#1a1a1a'
     grid_color = '#e5e5e5'
@@ -613,75 +566,8 @@ def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
     return save_path
 
 
-def plot_prediction_scatter(y_test, y_pred) -> str:
-    """Create actual vs predicted scatter plot with dark theme."""
-    bg_color = '#0a0a0f'
-    text_color = '#e4e4e7'
-    grid_color = '#27272a'
-    
-    fig, ax = plt.subplots(figsize=(8, 8), facecolor=bg_color)
-    ax.set_facecolor(bg_color)
-    
-    ax.scatter(y_test, y_pred, alpha=0.4, s=12, c='#818cf8', edgecolors='none')
-    
-    # Perfect prediction line
-    max_val = max(y_test.max(), max(y_pred))
-    ax.plot([0, max_val], [0, max_val], color='#f472b6', linestyle='--', linewidth=2, label='Perfect Prediction')
-    
-    ax.set_xlabel('Actual Price ($)', fontsize=12, color=text_color)
-    ax.set_ylabel('Predicted Price ($)', fontsize=12, color=text_color)
-    ax.set_title('Actual vs Predicted Prices', fontsize=16, fontweight='600', color=text_color, pad=20)
-    ax.legend(facecolor=bg_color, edgecolor=grid_color, labelcolor=text_color)
-    ax.tick_params(colors=text_color, labelsize=10)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color(grid_color)
-    ax.spines['left'].set_color(grid_color)
-    ax.grid(True, color=grid_color, alpha=0.3)
-    
-    plt.tight_layout()
-    save_path = "prediction_scatter.png"
-    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor=bg_color, edgecolor='none')
-    plt.close()
-    
-    return save_path
 
 
-def plot_price_distribution(prices) -> str:
-    """Create price distribution histogram with dark theme."""
-    bg_color = '#0a0a0f'
-    text_color = '#e4e4e7'
-    grid_color = '#27272a'
-    
-    fig, ax = plt.subplots(figsize=(10, 5), facecolor=bg_color)
-    ax.set_facecolor(bg_color)
-    
-    ax.hist(prices, bins=50, color='#818cf8', edgecolor=bg_color, alpha=0.85)
-    ax.axvline(prices.mean(), color='#f472b6', linestyle='--', linewidth=2, label=f'Mean: ${prices.mean():.0f}')
-    ax.axvline(prices.median(), color='#34d399', linestyle='--', linewidth=2, label=f'Median: ${prices.median():.0f}')
-    
-    ax.set_xlabel('Price ($)', fontsize=12, color=text_color)
-    ax.set_ylabel('Count', fontsize=12, color=text_color)
-    ax.set_title('Price Distribution', fontsize=16, fontweight='600', color=text_color, pad=20)
-    ax.legend(facecolor=bg_color, edgecolor=grid_color, labelcolor=text_color)
-    ax.tick_params(colors=text_color, labelsize=10)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color(grid_color)
-    ax.spines['left'].set_color(grid_color)
-    ax.yaxis.grid(True, color=grid_color, alpha=0.3)
-    
-    plt.tight_layout()
-    save_path = "price_distribution.png"
-    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor=bg_color, edgecolor='none')
-    plt.close()
-    
-    return save_path
-
-
-# =============================================================================
-# STEP 4: ENHANCED STREAMLIT DASHBOARD
-# =============================================================================
 
 def predict_price_for_location(
     lat: float,
@@ -796,7 +682,6 @@ def create_shap_waterfall_plot(model, X_pred: pd.DataFrame, predicted_price: flo
             feature_display_names.append(name)
     
     # Convert SHAP values from log to approximate dollar impact
-    # This is an approximation since the transformation is nonlinear
     shap_values_scaled = shap_values.values[0] * predicted_price / 2
     
     # Get top contributors (positive and negative)
@@ -854,7 +739,7 @@ def create_map_with_heatmap(center: list, df: pd.DataFrame, zoom: int = 12) -> f
         location=[UNION_STATION_LAT, UNION_STATION_LON],
         popup="Union Station (Transit Hub)",
         icon=folium.Icon(color='red', icon='train', prefix='fa'),
-        tooltip="🚂 Union Station"
+        tooltip="Union Station"
     ).add_to(m)
     
     return m
@@ -870,7 +755,7 @@ def main():
     
     apply_custom_styling()
     
-    # --- Header ---
+    # Header
     st.markdown("""
     <div class="main-header">
         <h1>InsightMap</h1>
@@ -878,9 +763,8 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # --- Load Pre-trained Model ---
+    # Load Model & Data
     with st.spinner("Loading model and data..."):
-        # Load pre-trained model (cached - loads only once)
         model, feature_names, top_neighbourhoods, metrics, importances = load_trained_model()
         
         # Load spatial data for predictions
@@ -923,7 +807,7 @@ def main():
     st.sidebar.write(f"**Median:** ${df['price'].median():.0f}")
     st.sidebar.write(f"**Range:** ${df['price'].min():.0f} - ${df['price'].max():.0f}")
     
-    # --- Main Content ---
+    # Main Content
     tab1, tab2, tab3 = st.tabs(["Price Predictor", "Model Insights", "Data Analysis"])
     
     with tab1:
@@ -947,7 +831,7 @@ def main():
                 
                 folium.Marker(
                     location=[clicked_lat, clicked_lon],
-                    popup=f"📍 Your Selection",
+                    popup="Your Selection",
                     icon=folium.Icon(color='green', icon='home', prefix='fa'),
                     tooltip="Your selected location"
                 ).add_to(m)
@@ -966,13 +850,12 @@ def main():
                     st.rerun()
         
         with col2:
-            st.markdown("### 💰 Prediction Result")
+            st.markdown("###Prediction Result")
             
             if clicked_lat is not None:
                 # Auto-detect neighbourhood from clicked location
                 detected_neighbourhood = detect_neighbourhood(clicked_lat, clicked_lon, neighbourhoods_gdf)
                 
-                # Map detected neighbourhood to model's known neighbourhoods
                 neighbourhood_for_model = detected_neighbourhood if detected_neighbourhood in top_neighbourhoods else 'Other'
                 
                 predicted_price, dist_subway, dist_union, X_pred = predict_price_for_location(
@@ -1031,7 +914,6 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Proximity indicator
                 if dist_subway < 500:
                     st.success("Excellent transit access!")
                 elif dist_subway < 1000:
@@ -1099,7 +981,7 @@ def main():
             st.bar_chart(top_hoods)
         
         st.markdown("---")
-        st.markdown("#### 📊 Dataset Statistics")
+        st.markdown("Dataset Statistics")
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1111,7 +993,6 @@ def main():
         with col4:
             st.metric("Avg Reviews", f"{df['number_of_reviews'].mean():.0f}")
     
-    # Footer
     st.markdown("---")
     st.markdown("""
     <div class="app-footer">
