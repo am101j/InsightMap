@@ -862,7 +862,7 @@ def main():
                     st.rerun()
         
         with col2:
-            st.markdown("###Prediction Result")
+            st.markdown("Prediction Result")
             
             if clicked_lat is not None:
                 # Auto-detect neighbourhood from clicked location
