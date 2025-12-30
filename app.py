@@ -578,7 +578,12 @@ def predict_price_for_location(
     subway_tree: cKDTree,
     union_coords: tuple,
     feature_names: list,
-    top_neighbourhoods: list
+    top_neighbourhoods: list,
+    number_of_reviews: int = 10,
+    reviews_per_month: float = 1.0,
+    minimum_nights: int = 2,
+    availability_365: int = 200,
+    calculated_host_listings_count: int = 1
 ) -> tuple:
     """
     Predict price for a given location with enhanced features.
@@ -604,11 +609,11 @@ def predict_price_for_location(
     feature_dict = {
         'dist_to_subway_meters': dist_subway,
         'dist_to_union_meters': dist_union,
-        'number_of_reviews': 10,  # Default: assume some reviews
-        'reviews_per_month': 1.0,  # Default: moderate activity
-        'minimum_nights': 2,       # Default: typical min stay
-        'availability_365': 200,   # Default: decent availability
-        'calculated_host_listings_count': 1  # Default: single listing host
+        'number_of_reviews': number_of_reviews,
+        'reviews_per_month': reviews_per_month,
+        'minimum_nights': minimum_nights,
+        'availability_365': availability_365,
+        'calculated_host_listings_count': calculated_host_listings_count
     }
     
     # One-hot encode room type
@@ -786,6 +791,13 @@ def main():
         options=['Entire home/apt', 'Private room', 'Shared room', 'Hotel room'],
         index=0
     )
+
+    with st.sidebar.expander("Fine-tune Estimation", expanded=False):
+        minimum_nights = st.slider("Minimum Nights", min_value=1, max_value=365, value=2, step=1)
+        availability_365 = st.slider("Availability (days/year)", min_value=0, max_value=365, value=200, step=5)
+        number_of_reviews = st.slider("Number of Reviews", min_value=0, max_value=500, value=10, step=5)
+        reviews_per_month = st.slider("Reviews per Month", min_value=0.0, max_value=20.0, value=1.0, step=0.1)
+        calculated_host_listings_count = st.slider("Host Listings Count", min_value=1, max_value=50, value=1, step=1)
     
     st.sidebar.caption("Neighbourhood is auto-detected from map click")
     
@@ -867,7 +879,12 @@ def main():
                     subway_tree=subway_tree,
                     union_coords=union_coords,
                     feature_names=feature_names,
-                    top_neighbourhoods=top_neighbourhoods
+                    top_neighbourhoods=top_neighbourhoods,
+                    number_of_reviews=number_of_reviews,
+                    reviews_per_month=reviews_per_month,
+                    minimum_nights=minimum_nights,
+                    availability_365=availability_365,
+                    calculated_host_listings_count=calculated_host_listings_count
                 )
                 
                 st.markdown(f"""
@@ -959,6 +976,15 @@ def main():
         st.markdown("### Feature Importance")
         st.image(importance_plot)
         st.caption("Features ranked by their impact on price predictions")
+        
+        st.markdown("---")
+        
+        # Prediction Scatter Plot
+        scatter_path = os.path.join(MODEL_DIR, "prediction_scatter.png")
+        if os.path.exists(scatter_path):
+            st.markdown("### Actual vs. Predicted")
+            st.image(scatter_path)
+            st.caption("Model accuracy visualization: points closer to the diagonal line indicate better predictions")
     
     with tab3:
         st.markdown("### Data Overview")
@@ -967,12 +993,19 @@ def main():
         
         with col1:
             st.markdown("#### Price Distribution")
-            # Create price bins for histogram with string labels
-            bins = [0, 50, 100, 150, 200, 300, 500, 1000]
-            labels = ['$0-50', '$50-100', '$100-150', '$150-200', '$200-300', '$300-500', '$500+']
-            price_bins = pd.cut(df['price'], bins=bins, labels=labels)
-            price_counts = price_bins.value_counts().sort_index()
-            st.bar_chart(price_counts)
+            
+            # Use pre-generated plot if available
+            dist_path = os.path.join(MODEL_DIR, "price_distribution.png")
+            if os.path.exists(dist_path):
+                st.image(dist_path)
+            else:
+                # Fallback: Create price bins for histogram with string labels
+                bins = [0, 50, 100, 150, 200, 300, 500, 1000]
+                labels = ['$0-50', '$50-100', '$100-150', '$150-200', '$200-300', '$300-500', '$500+']
+                price_bins = pd.cut(df['price'], bins=bins, labels=labels)
+                price_counts = price_bins.value_counts().sort_index()
+                st.bar_chart(price_counts)
+            
             st.caption(f"Mean: ${df['price'].mean():.0f} | Median: ${df['price'].median():.0f}")
         
         with col2:

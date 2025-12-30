@@ -26,6 +26,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import json
 import os
 import warnings
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
@@ -226,6 +227,10 @@ def train_model(X: pd.DataFrame, y_log: pd.Series, y_original: pd.Series) -> tup
     mae = mean_absolute_error(y_test_dollars, y_pred_dollars)
     r2 = r2_score(y_test_dollars, y_pred_dollars)
     
+    # Generate plots
+    plot_prediction_scatter(y_test_dollars, y_pred_dollars)
+    plot_price_distribution(y_original)
+    
     print(f"\n>> Model Performance:")
     print(f"   RMSE: ${rmse:.2f}")
     print(f"   MAE: ${mae:.2f}")
@@ -235,6 +240,47 @@ def train_model(X: pd.DataFrame, y_log: pd.Series, y_original: pd.Series) -> tup
     importances = dict(zip(X.columns, [float(x) for x in model.feature_importances_]))
     
     return model, metrics, importances
+
+
+def plot_prediction_scatter(y_test, y_pred):
+    """Generate and save actual vs predicted scatter plot."""
+    plt.figure(figsize=(8, 8), facecolor='#ffffff')
+    plt.scatter(y_test, y_pred, alpha=0.4, s=12, c='#22c55e', edgecolors='none')
+    
+    # Perfect prediction line
+    max_val = max(y_test.max(), max(y_pred))
+    plt.plot([0, max_val], [0, max_val], color='#ef4444', linestyle='--', linewidth=2, label='Perfect Prediction')
+    
+    plt.xlabel('Actual Price ($)', fontsize=12)
+    plt.ylabel('Predicted Price ($)', fontsize=12)
+    plt.title('Actual vs Predicted Prices', fontsize=14, fontweight='bold', pad=15)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    save_path = os.path.join(MODEL_DIR, "prediction_scatter.png")
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"   + Scatter plot saved: {save_path}")
+
+
+def plot_price_distribution(prices):
+    """Generate and save price distribution plot."""
+    plt.figure(figsize=(10, 6), facecolor='#ffffff')
+    plt.hist(prices, bins=50, color='#22c55e', alpha=0.7, edgecolor='none')
+    
+    plt.axvline(prices.mean(), color='#ef4444', linestyle='--', linewidth=2, label=f'Mean: ${prices.mean():.0f}')
+    plt.axvline(prices.median(), color='#3b82f6', linestyle='--', linewidth=2, label=f'Median: ${prices.median():.0f}')
+    
+    plt.xlabel('Price ($)', fontsize=12)
+    plt.ylabel('Count', fontsize=12)
+    plt.title('Price Distribution', fontsize=14, fontweight='bold', pad=15)
+    plt.legend()
+    plt.grid(True, alpha=0.3, axis='y')
+    
+    save_path = os.path.join(MODEL_DIR, "price_distribution.png")
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"   + Distribution plot saved: {save_path}")
 
 
 def save_model(model, feature_names, top_neighbourhoods, metrics, importances):
