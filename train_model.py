@@ -131,6 +131,12 @@ def load_and_clean_data(filepath: str) -> pd.DataFrame:
         df['has_ac'] = 0
         df['has_fparking'] = 0
         df['has_wifi'] = 0
+        df['has_wifi'] = 0
+
+    # FIX: Use cleansed neighbourhood name for accurate location (Re-applied)
+    if 'neighbourhood_cleansed' in df.columns:
+        df['neighbourhood'] = df['neighbourhood_cleansed']
+
     df['neighbourhood'] = df['neighbourhood'].fillna('Unknown')
     
     # Filter outliers
