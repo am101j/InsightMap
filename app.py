@@ -583,7 +583,15 @@ def predict_price_for_location(
     reviews_per_month: float = 1.0,
     minimum_nights: int = 2,
     availability_365: int = 200,
-    calculated_host_listings_count: int = 1
+    calculated_host_listings_count: int = 1,
+    accommodates: int = 2,
+    bedrooms: int = 1,
+    beds: int = 1,
+    bathrooms: float = 1.0,
+    has_pool: int = 0,
+    has_ac: int = 0,
+    has_fparking: int = 0,
+    has_wifi: int = 1
 ) -> tuple:
     """
     Predict price for a given location with enhanced features.
@@ -613,7 +621,15 @@ def predict_price_for_location(
         'reviews_per_month': reviews_per_month,
         'minimum_nights': minimum_nights,
         'availability_365': availability_365,
-        'calculated_host_listings_count': calculated_host_listings_count
+        'calculated_host_listings_count': calculated_host_listings_count,
+        'accommodates': accommodates,
+        'bedrooms': bedrooms,
+        'beds': beds,
+        'bathrooms': bathrooms,
+        'has_pool': has_pool,
+        'has_ac': has_ac,
+        'has_fparking': has_fparking,
+        'has_wifi': has_wifi
     }
     
     # One-hot encode room type
@@ -791,8 +807,26 @@ def main():
         options=['Entire home/apt', 'Private room', 'Shared room', 'Hotel room'],
         index=0
     )
+    
+    st.sidebar.markdown("### Property Details")
+    col_p1, col_p2 = st.sidebar.columns(2)
+    with col_p1:
+        accommodates = st.number_input("Guests", min_value=1, max_value=16, value=2)
+        bedrooms = st.number_input("Bedrooms", min_value=0, max_value=10, value=1)
+    with col_p2:
+        beds = st.number_input("Beds", min_value=1, max_value=20, value=1)
+        bathrooms = st.number_input("Baths", min_value=0.0, max_value=10.0, value=1.0, step=0.5)
 
-    with st.sidebar.expander("Fine-tune Estimation", expanded=False):
+    st.sidebar.markdown("### Amenities")
+    col_a1, col_a2 = st.sidebar.columns(2)
+    with col_a1:
+        has_wifi = 1 if st.checkbox("Wifi", value=True) else 0
+        has_ac = 1 if st.checkbox("A/C", value=True) else 0
+    with col_a2:
+        has_pool = 1 if st.checkbox("Pool") else 0
+        has_fparking = 1 if st.checkbox("Free Parking") else 0
+
+    with st.sidebar.expander("Advanced Settings", expanded=False):
         minimum_nights = st.slider("Minimum Nights", min_value=1, max_value=365, value=2, step=1)
         availability_365 = st.slider("Availability (days/year)", min_value=0, max_value=365, value=200, step=5)
         number_of_reviews = st.slider("Number of Reviews", min_value=0, max_value=500, value=10, step=5)
@@ -884,7 +918,15 @@ def main():
                     reviews_per_month=reviews_per_month,
                     minimum_nights=minimum_nights,
                     availability_365=availability_365,
-                    calculated_host_listings_count=calculated_host_listings_count
+                    calculated_host_listings_count=calculated_host_listings_count,
+                    accommodates=accommodates,
+                    bedrooms=bedrooms,
+                    beds=beds,
+                    bathrooms=bathrooms,
+                    has_pool=has_pool,
+                    has_ac=has_ac,
+                    has_fparking=has_fparking,
+                    has_wifi=has_wifi
                 )
                 
                 st.markdown(f"""

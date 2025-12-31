@@ -33,7 +33,7 @@ warnings.filterwarnings('ignore')
 
 # Configuration
 
-LISTINGS_PATH = "listings.csv"
+LISTINGS_PATH = "listings.csv.gz"
 SUBWAY_SHAPEFILE_PATH = "subway_data/TTC_SUBWAY_LINES_WGS84.shp"
 MODEL_DIR = "model"
 MAX_PRICE = 1000
@@ -46,7 +46,12 @@ def load_and_clean_data(filepath: str) -> pd.DataFrame:
     """Load and clean the Airbnb listings data."""
     print("[1/5] Loading listings data...")
     
-    df = pd.read_csv(filepath, on_bad_lines='skip')
+    # Check if gzip
+    if filepath.endswith('.gz'):
+        df = pd.read_csv(filepath, compression='gzip', on_bad_lines='skip', low_memory=False)
+    else:
+        df = pd.read_csv(filepath, on_bad_lines='skip', low_memory=False)
+    
     print(f"   Loaded {len(df):,} rows")
     
     # Clean price column
@@ -76,6 +81,29 @@ def load_and_clean_data(filepath: str) -> pd.DataFrame:
     df['calculated_host_listings_count'] = pd.to_numeric(
         df['calculated_host_listings_count'], errors='coerce'
     ).fillna(1)
+    # New Features from Detailed Data
+    df['accommodates'] = pd.to_numeric(df['accommodates'], errors='coerce').fillna(2)
+    df['bedrooms'] = pd.to_numeric(df['bedrooms'], errors='coerce').fillna(1)
+    df['beds'] = pd.to_numeric(df['beds'], errors='coerce').fillna(1)
+    
+    # Extract bathrooms from text (e.g. "1.5 baths" -> 1.5)
+    if 'bathrooms_text' in df.columns:
+        df['bathrooms'] = df['bathrooms_text'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
+    df['bathrooms'] = df['bathrooms'].fillna(1)
+
+    # Simplified Amenities Parsing
+    # We look for keywords like "Air conditioning", "Pool", "Wifi"
+    if 'amenities' in df.columns:
+        df['amenities'] = df['amenities'].astype(str).str.lower()
+        df['has_pool'] = df['amenities'].apply(lambda x: 1 if 'pool' in x else 0)
+        df['has_ac'] = df['amenities'].apply(lambda x: 1 if 'air conditioning' in x or 'ac' in x else 0)
+        df['has_fparking'] = df['amenities'].apply(lambda x: 1 if 'free parking' in x else 0)
+        df['has_wifi'] = df['amenities'].apply(lambda x: 1 if 'wifi' in x else 0)
+    else:
+        df['has_pool'] = 0
+        df['has_ac'] = 0
+        df['has_fparking'] = 0
+        df['has_wifi'] = 0
     df['neighbourhood'] = df['neighbourhood'].fillna('Unknown')
     
     # Filter outliers
@@ -159,7 +187,15 @@ def prepare_features(gdf: gpd.GeoDataFrame) -> tuple:
         'reviews_per_month',
         'minimum_nights',
         'availability_365',
-        'calculated_host_listings_count'
+        'calculated_host_listings_count',
+        'accommodates',
+        'bedrooms',
+        'beds',
+        'bathrooms',
+        'has_pool',
+        'has_ac',
+        'has_fparking',
+        'has_wifi'
     ]
     
     X = gdf[numeric_features].copy()
