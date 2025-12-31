@@ -469,7 +469,7 @@ def load_trained_model() -> tuple:
     To retrain the model, run: python train_model.py
     
     Returns:
-        tuple: (model, feature_names, top_neighbourhoods, metrics, importances)
+        tuple: (model, feature_names, top_neighbourhoods, top_props, metrics, importances)
     """
     model_path = os.path.join(MODEL_DIR, "xgboost_model.json")
     
@@ -499,6 +499,12 @@ def load_trained_model() -> tuple:
         top_neighbourhoods = json.load(f)
     print(f"   + {len(top_neighbourhoods)} neighbourhoods loaded")
     
+    # Try to load top property types if available
+    top_props = []
+    if os.path.exists(os.path.join(MODEL_DIR, "top_property_types.json")):
+        with open(os.path.join(MODEL_DIR, "top_property_types.json"), 'r') as f:
+            top_props = json.load(f)
+    
     with open(os.path.join(MODEL_DIR, "metrics.json"), 'r') as f:
         metrics = json.load(f)
     print(f"   + Metrics loaded (R^2: {metrics['r2']:.1%})")
@@ -506,7 +512,7 @@ def load_trained_model() -> tuple:
     with open(os.path.join(MODEL_DIR, "feature_importances.json"), 'r') as f:
         importances = json.load(f)
     
-    return booster, feature_names, top_neighbourhoods, metrics, importances
+    return booster, feature_names, top_neighbourhoods, top_props, metrics, importances
 
 
 def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
@@ -522,6 +528,8 @@ def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
             display_names.append(f.replace('hood_', ''))
         elif f.startswith('room_'):
             display_names.append(f.replace('room_', ''))
+        elif f.startswith('prop_'):
+            display_names.append(f.replace('prop_', ''))
         elif f == 'dist_to_subway_meters':
             display_names.append('Subway Distance')
         elif f == 'dist_to_union_meters':
@@ -536,6 +544,14 @@ def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
             display_names.append('Availability')
         elif f == 'calculated_host_listings_count':
             display_names.append('Host Listings')
+        elif f == 'review_scores_rating':
+            display_names.append('Rating')
+        elif f == 'host_is_superhost':
+            display_names.append('Superhost')
+        elif f == 'privacy_index':
+            display_names.append('Privacy Index')
+        elif f == 'bathroom_ratio':
+            display_names.append('Bath Ratio')
         else:
             display_names.append(f)
     
@@ -566,12 +582,10 @@ def plot_feature_importance(importances: dict, top_n: int = 15) -> str:
     return save_path
 
 
-
-
-
 def predict_price_for_location(
     lat: float,
     lon: float,
+    property_type: str,
     room_type: str,
     neighbourhood: str,
     model,  # xgb.Booster
@@ -579,6 +593,7 @@ def predict_price_for_location(
     union_coords: tuple,
     feature_names: list,
     top_neighbourhoods: list,
+    top_props: list,
     number_of_reviews: int = 10,
     reviews_per_month: float = 1.0,
     minimum_nights: int = 2,
@@ -591,7 +606,11 @@ def predict_price_for_location(
     has_pool: int = 0,
     has_ac: int = 0,
     has_fparking: int = 0,
-    has_wifi: int = 1
+    has_wifi: int = 1,
+    review_scores_rating: float = 4.8,
+    host_is_superhost: int = 0,
+    host_identity_verified: int = 1,
+    instant_bookable: int = 0
 ) -> tuple:
     """
     Predict price for a given location with enhanced features.
@@ -613,6 +632,10 @@ def predict_price_for_location(
     union_x, union_y = union_coords
     dist_union = np.sqrt((x - union_x) ** 2 + (y - union_y) ** 2)
     
+    # Interactions
+    privacy_index = bedrooms / (accommodates + 0.1)
+    bathroom_ratio = bathrooms / (bedrooms + 0.1)
+
     # Build feature vector
     feature_dict = {
         'dist_to_subway_meters': dist_subway,
@@ -629,9 +652,26 @@ def predict_price_for_location(
         'has_pool': has_pool,
         'has_ac': has_ac,
         'has_fparking': has_fparking,
-        'has_wifi': has_wifi
+        'has_wifi': has_wifi,
+        'review_scores_rating': review_scores_rating,
+        'review_scores_cleanliness': review_scores_rating, # Proxy if not set
+        'review_scores_location': review_scores_rating,    # Proxy if not set
+        'review_scores_value': review_scores_rating,       # Proxy if not set
+        'host_is_superhost': host_is_superhost,
+        'host_identity_verified': host_identity_verified,
+        'instant_bookable': instant_bookable,
+        'privacy_index': privacy_index,
+        'bathroom_ratio': bathroom_ratio
     }
     
+    # One-hot encode property type
+    prop_grouped = property_type if property_type in top_props else 'Other'
+    all_props = top_props + ['Other'] if top_props else []
+    for p in all_props:
+        col_name = f'prop_{p}'
+        if col_name in feature_names:
+            feature_dict[col_name] = 1 if p == prop_grouped else 0
+
     # One-hot encode room type
     room_types = ['Entire home/apt', 'Private room', 'Shared room', 'Hotel room']
     for rt in room_types:
@@ -685,6 +725,8 @@ def create_shap_waterfall_plot(model, X_pred: pd.DataFrame, predicted_price: flo
             feature_display_names.append(name.replace('hood_', ''))
         elif name.startswith('room_'):
             feature_display_names.append(name.replace('room_', ''))
+        elif name.startswith('prop_'):
+            feature_display_names.append(name.replace('prop_', ''))
         elif name == 'dist_to_subway_meters':
             feature_display_names.append('Subway Dist')
         elif name == 'dist_to_union_meters':
@@ -699,6 +741,14 @@ def create_shap_waterfall_plot(model, X_pred: pd.DataFrame, predicted_price: flo
             feature_display_names.append('Availability')
         elif name == 'calculated_host_listings_count':
             feature_display_names.append('Host Listings')
+        elif name == 'review_scores_rating':
+            feature_display_names.append('Rating')
+        elif name == 'host_is_superhost':
+            feature_display_names.append('Superhost')
+        elif name == 'privacy_index':
+            feature_display_names.append('Privacy Index')
+        elif name == 'bathroom_ratio':
+            feature_display_names.append('Bath Ratio')
         else:
             feature_display_names.append(name)
     
@@ -736,8 +786,8 @@ def create_shap_waterfall_plot(model, X_pred: pd.DataFrame, predicted_price: flo
         label = f'+${val:.0f}' if val > 0 else f'-${abs(val):.0f}'
         x_pos = val + (2 if val > 0 else -2)
         ax.text(x_pos, bar.get_y() + bar.get_height()/2, label,
-                va='center', ha='left' if val > 0 else 'right',
-                fontsize=8, color='#1a1a1a')
+                 va='center', ha='left' if val > 0 else 'right',
+                 fontsize=8, color='#1a1a1a')
     
     plt.tight_layout()
     save_path = "shap_explanation.png"
@@ -786,7 +836,7 @@ def main():
     
     # Load Model & Data
     with st.spinner("Loading model and data..."):
-        model, feature_names, top_neighbourhoods, metrics, importances = load_trained_model()
+        model, feature_names, top_neighbourhoods, top_props, metrics, importances = load_trained_model()
         
         # Load spatial data for predictions
         df = load_and_clean_data(LISTINGS_PATH)
@@ -797,285 +847,205 @@ def main():
         
         # Generate plots (cached)
         importance_plot = plot_feature_importance(importances)
+    
+    # ==========================
+    # SESSION STATE MGMT
+    # ==========================
+    if 'clicked_coords' not in st.session_state:
+        st.session_state.clicked_coords = TORONTO_CENTER
 
-    
-    # --- Sidebar ---
-    st.sidebar.markdown("## Settings")
-    
-    room_type = st.sidebar.selectbox(
-        "Room Type",
-        options=['Entire home/apt', 'Private room', 'Shared room', 'Hotel room'],
-        index=0
-    )
-    
-    st.sidebar.markdown("### Property Details")
-    col_p1, col_p2 = st.sidebar.columns(2)
-    with col_p1:
-        accommodates = st.number_input("Guests", min_value=1, max_value=16, value=2)
-        bedrooms = st.number_input("Bedrooms", min_value=0, max_value=10, value=1)
-    with col_p2:
-        beds = st.number_input("Beds", min_value=1, max_value=20, value=1)
-        bathrooms = st.number_input("Baths", min_value=0.0, max_value=10.0, value=1.0, step=0.5)
-
-    st.sidebar.markdown("### Amenities")
-    col_a1, col_a2 = st.sidebar.columns(2)
-    with col_a1:
-        has_wifi = 1 if st.checkbox("Wifi", value=True) else 0
-        has_ac = 1 if st.checkbox("A/C", value=True) else 0
-    with col_a2:
-        has_pool = 1 if st.checkbox("Pool") else 0
-        has_fparking = 1 if st.checkbox("Free Parking") else 0
-
-    with st.sidebar.expander("Advanced Settings", expanded=False):
-        minimum_nights = st.slider("Minimum Nights", min_value=1, max_value=365, value=2, step=1)
-        availability_365 = st.slider("Availability (days/year)", min_value=0, max_value=365, value=200, step=5)
-        number_of_reviews = st.slider("Number of Reviews", min_value=0, max_value=500, value=10, step=5)
-        reviews_per_month = st.slider("Reviews per Month", min_value=0.0, max_value=20.0, value=1.0, step=0.1)
-        calculated_host_listings_count = st.slider("Host Listings Count", min_value=1, max_value=50, value=1, step=1)
-    
-    st.sidebar.caption("Neighbourhood is auto-detected from map click")
-    
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("## Model Metrics")
-    
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        st.metric("RMSE", f"${metrics['rmse']:.0f}")
-    with col2:
-        st.metric("MAE", f"${metrics['mae']:.0f}")
-    
-    st.sidebar.metric("R² Score", f"{metrics['r2']:.2%}")
-    st.sidebar.caption(f"Based on {len(df):,} listings")
-    
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Price Stats")
-    st.sidebar.write(f"**Mean:** ${df['price'].mean():.0f}")
-    st.sidebar.write(f"**Median:** ${df['price'].median():.0f}")
-    st.sidebar.write(f"**Range:** ${df['price'].min():.0f} - ${df['price'].max():.0f}")
-    
-    # Main Content
-    tab1, tab2, tab3 = st.tabs(["Price Predictor", "Model Insights", "Data Analysis"])
-    
-    with tab1:
-        col1, col2 = st.columns([2, 1])
+    # ==========================
+    # SIDEBAR: Inputs
+    # ==========================
+    with st.sidebar:
+        st.header("Settings")
         
-        with col1:
-            st.markdown("### Click to Predict Price")
-            st.caption("Click anywhere on the map to get a predicted nightly price for that location.")
+        # Room Type First (as per screenshot)
+        room_type = st.selectbox("Room Type", ["Entire home/apt", "Private room", "Shared room", "Hotel room"])
+        
+        st.markdown("### Property Details")
+        col_g, col_b = st.columns(2)
+        with col_g:
+            accommodates = st.number_input("Guests", 1, 16, 2)
+        with col_b:
+            beds = st.number_input("Beds", 0, 15, 1)
             
-            # Check for previous clicks
-            clicked_lat = None
-            clicked_lon = None
+        col_bed, col_bath = st.columns(2)
+        with col_bed:
+            bedrooms = st.number_input("Bedrooms", 0, 10, 1)
+        with col_bath:
+            bathrooms = st.number_input("Baths", 0.0, 10.0, 1.0, 0.5)
+
+        st.markdown("### Amenities")
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            has_wifi = st.checkbox("Wifi", True)
+            has_ac = st.checkbox("A/C", False)
+        with col_a2:
+            has_pool = st.checkbox("Pool", False)
+            has_fparking = st.checkbox("Free Parking", False)
+
+        with st.expander("Advanced Settings"):
+            prop_type = st.selectbox("Property Type", ["Entire home/apt", "Private room", "Shared room", "Hotel room"] + (top_props if top_props else []))
+            is_superhost = st.toggle("Superhost", False)
+            rating = st.slider("Guest Rating", 0.0, 5.0, 4.8)
+            n_reviews = st.number_input("Total Reviews", 0, 1000, 50)
+            reviews_per_mo = st.number_input("Reviews/Month", 0.0, 20.0, 1.5)
+
+
+    # ==========================
+    # MAIN TABS
+    # ==========================
+    tab_pred, tab_insights, tab_data = st.tabs(["Price Predictor", "Model Insights", "Data Analysis"])
+    
+    # --- TAB 1: Price Predictor ---
+    with tab_pred:
+        st.markdown("### Click to Predict Price")
+        st.caption("Click anywhere on the map to get a predicted nightly price for that location.")
+        
+        col_map, col_res = st.columns([2, 1], gap="medium")
+        
+        with col_map:
+            # Create Basemap
+            m = create_map_with_heatmap(st.session_state.clicked_coords, df)
             
-            # Create map with heatmap
-            m = create_map_with_heatmap(TORONTO_CENTER, df)
+            # Add a marker for the current selected location
+            folium.Marker(
+                location=st.session_state.clicked_coords,
+                popup="Selected Location",
+                icon=folium.Icon(color="green", icon="home", prefix='fa')
+            ).add_to(m)
+
+            # Render Map & Logic
+            map_output = st_folium(m, height=500, width="100%")
             
-            # Add marker for previous click
-            if 'last_click' in st.session_state and st.session_state.last_click:
-                clicked_lat = st.session_state.last_click['lat']
-                clicked_lon = st.session_state.last_click['lng']
-                
-                folium.Marker(
-                    location=[clicked_lat, clicked_lon],
-                    popup="Your Selection",
-                    icon=folium.Icon(color='green', icon='home', prefix='fa'),
-                    tooltip="Your selected location"
-                ).add_to(m)
-            
-            map_data = st_folium(m, width=None, height=500, returned_objects=["last_clicked"])
-            
-            # Handle clicks
-            if map_data and map_data.get("last_clicked"):
-                new_lat = map_data["last_clicked"]["lat"]
-                new_lng = map_data["last_clicked"]["lng"]
-                
-                if 'last_click' not in st.session_state or \
-                   st.session_state.last_click is None or \
-                   st.session_state.last_click.get('lat') != new_lat:
-                    st.session_state.last_click = {'lat': new_lat, 'lng': new_lng}
+            if map_output['last_clicked']:
+                new_lat = map_output['last_clicked']['lat']
+                new_lng = map_output['last_clicked']['lng']
+                if (new_lat != st.session_state.clicked_coords[0] or 
+                    new_lng != st.session_state.clicked_coords[1]):
+                    st.session_state.clicked_coords = [new_lat, new_lng]
                     st.rerun()
-        
-        with col2:
-            st.markdown("Prediction Result")
+
+        with col_res:
+            st.markdown("#### Prediction Result")
             
-            if clicked_lat is not None:
-                # Auto-detect neighbourhood from clicked location
-                detected_neighbourhood = detect_neighbourhood(clicked_lat, clicked_lon, neighbourhoods_gdf)
+            # Use coords from state
+            clicked_lat = st.session_state.clicked_coords[0]
+            clicked_lon = st.session_state.clicked_coords[1]
                 
-                neighbourhood_for_model = detected_neighbourhood if detected_neighbourhood in top_neighbourhoods else 'Other'
-                
-                predicted_price, dist_subway, dist_union, X_pred = predict_price_for_location(
-                    lat=clicked_lat,
-                    lon=clicked_lon,
-                    room_type=room_type,
-                    neighbourhood=neighbourhood_for_model,
-                    model=model,
-                    subway_tree=subway_tree,
-                    union_coords=union_coords,
-                    feature_names=feature_names,
-                    top_neighbourhoods=top_neighbourhoods,
-                    number_of_reviews=number_of_reviews,
-                    reviews_per_month=reviews_per_month,
-                    minimum_nights=minimum_nights,
-                    availability_365=availability_365,
-                    calculated_host_listings_count=calculated_host_listings_count,
-                    accommodates=accommodates,
-                    bedrooms=bedrooms,
-                    beds=beds,
-                    bathrooms=bathrooms,
-                    has_pool=has_pool,
-                    has_ac=has_ac,
-                    has_fparking=has_fparking,
-                    has_wifi=has_wifi
-                )
-                
-                st.markdown(f"""
-                <div class="prediction-box">
-                    <div class="prediction-price">${predicted_price:.0f}</div>
-                    <div class="prediction-label">estimated per night</div>
+            # Detect Neighbourhood
+            detected_hood = detect_neighbourhood(clicked_lat, clicked_lon, neighbourhoods_gdf)
+            
+            # Run Prediction
+            predicted_price, dist_subway, dist_union, X_pred = predict_price_for_location(
+                lat=clicked_lat,
+                lon=clicked_lon,
+                property_type=prop_type,
+                room_type=room_type,
+                neighbourhood=detected_hood,
+                model=model,
+                subway_tree=subway_tree,
+                union_coords=union_coords,
+                feature_names=feature_names,
+                top_neighbourhoods=top_neighbourhoods,
+                top_props=top_props if top_props else [],
+                bedrooms=bedrooms,
+                bathrooms=bathrooms,
+                accommodates=accommodates,
+                beds=beds,
+                review_scores_rating=rating,
+                number_of_reviews=n_reviews,
+                reviews_per_month=reviews_per_mo,
+                host_is_superhost=1 if is_superhost else 0,
+                has_wifi=1 if has_wifi else 0,
+                has_ac=1 if has_ac else 0,
+                has_pool=1 if has_pool else 0,
+                has_fparking=1 if has_fparking else 0
+            )
+            
+            # Display Prediction
+            st.markdown(f"""
+            <div class="prediction-box">
+                <div style="color: #666; font-size: 0.9rem; margin-bottom: 0.5rem;">
+                    Estimated Nightly Price
                 </div>
-                """, unsafe_allow_html=True)
-                
-                # SHAP Explanation - The "Wow" Factor
-                with st.expander("Why this price? (ML Explanation)", expanded=True):
-                    try:
-                        shap_plot = create_shap_waterfall_plot(model, X_pred, predicted_price)
-                        st.image(shap_plot)
-                        st.caption("Green = increases price, Red = decreases price")
-                    except Exception as e:
-                        st.info("SHAP explanation unavailable")
-                
-                st.markdown(f"""
-                <div class="location-details">
-                    <h4>Location</h4>
-                    <div class="detail-row">
-                        <span class="detail-label">Neighbourhood</span>
-                        <span class="detail-value">{detected_neighbourhood}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Room Type</span>
-                        <span class="detail-value">{room_type}</span>
-                    </div>
+                <div class="prediction-price">${predicted_price:.0f}</div>
+                <div style="color: #1a1a1a; font-weight: 500; margin-top: 0.5rem;">
+                    {detected_hood}
                 </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown(f"""
-                <div class="location-details">
-                    <h4>Transit Access</h4>
-                    <div class="detail-row">
-                        <span class="detail-label">Nearest Subway</span>
-                        <span class="detail-value">{dist_subway:,.0f}m</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Union Station</span>
-                        <span class="detail-value">{dist_union/1000:,.1f}km</span>
-                    </div>
+                <div style="color: #888; font-size: 0.8rem; margin-top: 0.25rem;">
+                    {dist_subway/1000:.1f}km to Subway • {dist_union/1000:.1f}km to Downtown
                 </div>
-                """, unsafe_allow_html=True)
-                
-                if dist_subway < 500:
-                    st.success("Excellent transit access!")
-                elif dist_subway < 1000:
-                    st.info("Good transit access")
-                else:
-                    st.warning("Limited transit access")
-            else:
-                st.markdown("""
-                <div class="location-details" style="text-align: center; padding: 3rem 1.5rem;">
-                    <p style="color: #666666; font-size: 1rem; margin: 0;">Click anywhere on the map</p>
-                    <p style="color: #999999; font-size: 0.9rem; margin-top: 0.5rem;">to get a price prediction for that location</p>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    with tab2:
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Explanation (SHAP) - Optional in this view or collapsed
+            with st.expander("See Price Breakdown"):
+                 shap_plot_path = create_shap_waterfall_plot(model, X_pred, predicted_price)
+                 st.image(shap_plot_path)
+
+    # --- TAB 2: Model Insights ---
+    with tab_insights:
         st.markdown("### Model Performance")
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        m_col1, m_col2, m_col3 = st.columns(3)
+        with m_col1:
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-value">${metrics['rmse']:.0f}</div>
                 <div class="metric-label">RMSE (Root Mean Square Error)</div>
             </div>
             """, unsafe_allow_html=True)
-        with col2:
+        with m_col2:
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-value">${metrics['mae']:.0f}</div>
                 <div class="metric-label">MAE (Mean Absolute Error)</div>
             </div>
             """, unsafe_allow_html=True)
-        with col3:
+        with m_col3:
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-value">{metrics['r2']:.1%}</div>
                 <div class="metric-label">R² (Variance Explained)</div>
             </div>
             """, unsafe_allow_html=True)
-        
+            
         st.markdown("---")
-        
         st.markdown("### Feature Importance")
-        st.image(importance_plot)
-        st.caption("Features ranked by their impact on price predictions")
-        
-        st.markdown("---")
-        
-        # Prediction Scatter Plot
-        scatter_path = os.path.join(MODEL_DIR, "prediction_scatter.png")
-        if os.path.exists(scatter_path):
-            st.markdown("### Actual vs. Predicted")
-            st.image(scatter_path)
-            st.caption("Model accuracy visualization: points closer to the diagonal line indicate better predictions")
-    
-    with tab3:
+        st.image(importance_plot, use_column_width=True)
+
+    # --- TAB 3: Data Analysis ---
+    with tab_data:
         st.markdown("### Data Overview")
         
-        col1, col2 = st.columns(2)
+        col_d1, col_d2 = st.columns(2)
         
-        with col1:
+        with col_d1:
             st.markdown("#### Price Distribution")
+            # Create a histogram using Streamlit
+            price_hist = np.histogram(df['price'], bins=list(range(0, 501, 50)) + [1000])
+            hist_df = pd.DataFrame({
+                'Price Range': [f"${i}-{i+50}" if i < 500 else "$500+" for i in range(0, 500, 50)] + ["$500+"],
+                'Count': price_hist[0]
+            })
+            st.bar_chart(hist_df.set_index('Price Range'), color="#0068c9")
             
-            # Use pre-generated plot if available
-            dist_path = os.path.join(MODEL_DIR, "price_distribution.png")
-            if os.path.exists(dist_path):
-                st.image(dist_path)
-            else:
-                # Fallback: Create price bins for histogram with string labels
-                bins = [0, 50, 100, 150, 200, 300, 500, 1000]
-                labels = ['$0-50', '$50-100', '$100-150', '$150-200', '$200-300', '$300-500', '$500+']
-                price_bins = pd.cut(df['price'], bins=bins, labels=labels)
-                price_counts = price_bins.value_counts().sort_index()
-                st.bar_chart(price_counts)
+            st.caption(f"Mean Price: ${df['price'].mean():.0f} | Median Price: ${df['price'].median():.0f}")
             
-            st.caption(f"Mean: ${df['price'].mean():.0f} | Median: ${df['price'].median():.0f}")
-        
-        with col2:
+        with col_d2:
             st.markdown("#### Top Neighbourhoods by Count")
-            top_hoods = df['neighbourhood'].value_counts().head(10)
-            st.bar_chart(top_hoods)
-        
-        st.markdown("---")
-        st.markdown("Dataset Statistics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Listings", f"{len(df):,}")
-        with col2:
-            st.metric("Neighbourhoods", f"{df['neighbourhood'].nunique()}")
-        with col3:
-            st.metric("Avg Price", f"${df['price'].mean():.0f}")
-        with col4:
-            st.metric("Avg Reviews", f"{df['number_of_reviews'].mean():.0f}")
-    
-    st.markdown("---")
-    st.markdown("""
-    <div class="app-footer">
-        <p><strong>InsightMap</strong> · Geospatial ML Portfolio Project</p>
-        <p style="color: #999999; font-size: 0.8rem;">Built with Python · Streamlit · GeoPandas · XGBoost · SHAP</p>
-    </div>
-    """, unsafe_allow_html=True)
+            hood_counts = df['neighbourhood'].value_counts().head(10)
+            st.bar_chart(hood_counts, color="#0068c9")
 
+        st.markdown("---")
+        st.markdown("#### Dataset Statistics")
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        stat_col1.metric("Total Listings", f"{len(df):,}")
+        stat_col2.metric("Neighbourhoods", f"{df['neighbourhood'].nunique()}")
+        stat_col3.metric("Avg Price", f"${df['price'].mean():.0f}")
+        stat_col4.metric("Avg Reviews", f"{df['number_of_reviews'].mean():.0f}")
 
 if __name__ == "__main__":
     main()
